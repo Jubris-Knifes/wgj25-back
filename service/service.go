@@ -249,6 +249,10 @@ func (s *service) startRound() {
 }
 
 func (s *service) startTurn() {
+	go s.startPlayerBid()
+}
+
+func (s *service) startPlayerBid() {
 	ctx := context.Background()
 
 	currentPlayerID, err := s.repo.GetCurrentPlayerID(ctx)
@@ -279,18 +283,132 @@ func (s *service) startTurn() {
 	case <-ctx.Done():
 	}
 
-	s.sendhowChoiceEvent(choice, currentPlayerID)
+	s.sendPlayerBidWasSelectedEvent(choice, currentPlayerID)
+
+	go s.startPlayersOffers()
 }
 
-func (s *service) sendhowChoiceEvent(choice models.Card, playerID int) {
+func (s *service) startPlayersOffers() {
+	ctx := context.Background()
+	currentPlayerID, err := s.repo.GetCurrentPlayerID(ctx)
+	if err != nil {
+		s.log.ErrorContext(ctx, "failed to get current player ID", "error", err)
+		panic(err)
+	}
+
+	playerIDs, err := s.repo.GetActivePlayerIDs(ctx)
+	if err != nil {
+		s.log.ErrorContext(ctx, "failed to get active player IDs", "error", err)
+		panic(err)
+	}
+
+	playerIDs = slices.DeleteFunc(playerIDs, func(id int) bool {
+		return id == currentPlayerID
+	})
+
+	timeout := time.Duration(config.Get().Timeouts.PlayerChooseOfferMilliseconds) * time.Millisecond
+
+	event := models.ChooseOfferEvent{
+		Type: models.EventTypeChooseOffer,
+		EventData: models.ChooseOffer{
+			PlayerIDs: playerIDs,
+			Timeout:   timeout.Milliseconds(),
+		},
+	}
+
+	payload, err := json.Marshal(event)
+	if err != nil {
+		s.log.ErrorContext(ctx, "failed to marshal choose_offer event", "error", err)
+		panic(err)
+	}
+
+	err = s.m.BroadcastFilter(payload, func(session *melody.Session) bool {
+		pID, ok := getAs[int](s.log, session, PlayerIDKey)
+		return !ok || slices.Contains(playerIDs, pID)
+	})
+
+	if err != nil {
+		s.log.ErrorContext(ctx, "failed to broadcast choose_offer event", "error", err)
+		panic(err)
+	}
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	s.log.DebugContext(ctx, "choose_offer event broadcasted", "player_ids", playerIDs)
+
+	playerDidOffer := make([]int, 0, len(playerIDs))
+	playerOffers := make(map[int]models.Card, 3)
+	for _, playerID := range playerIDs {
+		playerHand, err := s.repo.GetPlayerHand(ctx, playerID)
+		if err != nil {
+			s.log.ErrorContext(ctx, "failed to get player hand", "error", err,
+				"player_id", playerID,
+			)
+			panic(err)
+		}
+
+		playerOffers[playerID] = playerHand[rand.IntN(len(playerHand))]
+		s.log.DebugContext(ctx, "selected player offer", "player_id", playerID, "offer", playerOffers[playerID])
+	}
+
+	for count := 0; count < len(playerIDs); count++ {
+		select {
+		case playerChoice := <-offerSelectChan: // make offerchan as global varible
+			playerOffers[playerChoice.PlayerID] = playerChoice.Card
+			playerDidOffer = append(playerDidOffer, playerChoice.PlayerID)
+			s.sendPlayerOfferEvent(playerDidOffer)
+		case <-ctx.Done():
+			s.log.DebugContext(ctx, "timeout reached for player offers")
+			count = len(playerIDs) // Force exit the loop
+		}
+	}
+
+	s.sendAllPlayerOffersEvent(playerOffers) //wait before sending this event inside the function and then send it to the hub only then sleep after sending
+
+	// go to next step I think next turn but I'm tired IDK
+}
+
+func (s *service) sendPlayerOfferEvent(playerIDs []int) {
 	ctx := context.Background()
 
+	s.log.DebugContext(ctx, "sending player offer event", "player_ids", playerIDs)
+
+	event := models.PlayerOfferEvent{
+		Type: models.EventTypePlayerOffer,
+		EventData: models.PlayerOffer{
+			PlayerIDs: playerIDs,
+		},
+	}
+
+	payload, err := json.Marshal(event)
+	if err != nil {
+		s.log.ErrorContext(ctx, "failed to marshal player_offer event", "error", err)
+		panic(err)
+	}
+
+	err = s.m.BroadcastFilter(payload, func(session *melody.Session) bool {
+		_, ok := getAs[int](s.log, session, PlayerIDKey)
+		return _ok
+	})
+	if err != nil {
+		s.log.ErrorContext(ctx, "failed to broadcast player_offer event", "error", err)
+		panic(err)
+	}
+
+	s.log.DebugContext(ctx, "player_offer event sent", "player_ids", playerIDs)
+}
+
+func (s *service) sendPlayerBidWasSelectedEvent(choice models.Card, playerID int) {
+	ctx := context.Background()
+
+	time.Sleep(time.Duration(config.Get().Timeouts.TimeBetweenActionsMilliseconds) * time.Millisecond)
 	s.log.DebugContext(ctx, "sending how choice event", "player_id", playerID, "card", choice)
 
-	event := models.BidSelectedEvent{
+	timeout := time.Duration(config.Get().Timeouts.ShowBidMilliseconds) * time.Millisecond
+	event := models.ShowBidSelectedEvent{
 		Type: models.EventTypeBidSelected,
-		EventData: models.BidSelected{
-			Card: choice,
+		EventData: models.ShowBidSelected{
+			Card:    choice,
+			Timeout: timeout.Milliseconds(),
 		},
 	}
 
@@ -304,11 +422,11 @@ func (s *service) sendhowChoiceEvent(choice models.Card, playerID int) {
 
 	s.log.DebugContext(ctx, "bid_selected event sent", "player_id", playerID, "card", choice)
 
+	time.Sleep(timeout)
 }
 
 func (s *service) sendPlayerBidOfferEvent(ctx context.Context, playerID int, timeout time.Duration) {
 	s.log.DebugContext(ctx, "sending player bid offer event", "player_id", playerID)
-
 	event := models.ChooseBidEvent{
 		Type: models.EventTypeChooseBid,
 		EventData: models.ChooseBid{

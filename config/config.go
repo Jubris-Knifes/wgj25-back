@@ -14,10 +14,11 @@ type (
 	}
 
 	timeouts struct {
-		PlayerChooseBidMilliseconds   int `env:"TIMEOUT_PLAYER_CHOOSE_BID_MILLISECONDS" envDefault:"5000"`
-		ShowBidMilliseconds           int `env:"TIMEOUT_SHOW_BID_MILLISECONDS" envDefault:"1500"`
-		PlayerChooseOfferMilliseconds int `env:"TIMEOUT_PLAYER_CHOOSE_OFFER_MILLISECONDS" envDefault:"5000"`
-		ShowOfferMilliseconds         int `env:"TIMEOUT_SHOW_OFFER_MILLISECONDS" envDefault:"2500"`
+		PlayerChooseBidMilliseconds    int `env:"TIMEOUT_PLAYER_CHOOSE_BID_MILLISECONDS" envDefault:"5000"`
+		ShowBidMilliseconds            int `env:"TIMEOUT_SHOW_BID_MILLISECONDS" envDefault:"1500"`
+		PlayerChooseOfferMilliseconds  int `env:"TIMEOUT_PLAYER_CHOOSE_OFFER_MILLISECONDS" envDefault:"5000"`
+		ShowOfferMilliseconds          int `env:"TIMEOUT_SHOW_OFFER_MILLISECONDS" envDefault:"2500"`
+		TimeBetweenActionsMilliseconds int `env:"TIME_BETWEEN_ACTIONS_MILLISECONDS" envDefault:"1000"`
 	}
 
 	config struct {
