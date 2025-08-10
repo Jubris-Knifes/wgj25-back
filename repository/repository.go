@@ -29,6 +29,62 @@ func New(logger *slog.Logger, db *sql.DB) *Repository {
 	}
 }
 
+func (r *Repository) SwapCardHolders(ctx context.Context,
+	card1 models.Card, card2 models.Card, player1 int, player2 int) error {
+
+	tx, err := r.db.Begin()
+	defer rollback(tx)
+	if err != nil {
+		r.log.Error("failed to begin transaction", "error", err)
+		return err
+	}
+	const queryUpdateCard = `
+		UPDATE player_hand
+		SET player_id = ?
+		WHERE player_id = ? AND card_id = ? AND card_type = ? AND is_real = ?
+	`
+
+	_, err = tx.ExecContext(ctx, queryUpdateCard, player2, player1, card1.ID, card1.Type, card1.IsReal)
+	if err != nil {
+		r.log.ErrorContext(ctx, "give player one's card to player 2",
+			"card", card1, "player_one", player1, "player_two", player2,
+			"error", err)
+		return err
+	}
+
+	_, err = tx.ExecContext(ctx, queryUpdateCard, player1, player2, card2.ID, card2.Type, card2.IsReal)
+	if err != nil {
+		r.log.ErrorContext(ctx, "give player two's card to player 1",
+			"card", card2, "player_one", player1, "player_two", player2,
+			"error", err)
+		return err
+	}
+
+	if err := tx.Commit(); err != nil {
+		r.log.ErrorContext(ctx, "failed to commit transaction", "error", err)
+		return err
+	}
+
+	return nil
+}
+
+func (r *Repository) GetPlayerScores(ctx context.Context) ([]models.Score, error) {
+	r.log.DebugContext(ctx, "getting player scores")
+
+	const query = `
+		SELECT ps.player_id, ps.points FROM player_scores AS ps JOIN players AS p ON ps.player_id = p.player_id
+		WHERE p.is_active = TRUE
+	`
+	var scores []models.Score
+	if err := sqlscan.Select(ctx, r.db, &scores, query); err != nil {
+		r.log.ErrorContext(ctx, "failed to get player scores", "error", err)
+		return nil, err
+	}
+
+	r.log.DebugContext(ctx, "player scores retrieved", "scores", scores)
+	return scores, nil
+}
+
 func (r *Repository) NewPlayer(ctx context.Context, playerName string) (int, error) {
 	r.log.DebugContext(ctx, "creating new player", "player_name", playerName)
 

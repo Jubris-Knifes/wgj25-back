@@ -18,3 +18,8 @@ CREATE UNIQUE INDEX idx_player_card_unique_card ON player_hand (card_id, card_ty
 CREATE TABLE current_player (
     current_player_id INTEGER
 )
+
+CREATE TABLE player_scores (
+    player_id INTEGER PRIMARY KEY,
+    points INTEGER NOT NULL DEFAULT 0,
+)
