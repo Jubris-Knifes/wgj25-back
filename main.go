@@ -1,3 +1,30 @@
+//                     ..;;;;,
+//                   .coooooolc,
+//                  :ooooooldOOO,
+//                .:ooooooocdNMK
+//               .cooooooooo:.
+//      .'looool,coooooooooooc;looool'.
+//     ,okkkkkkkxoooooooooooodxkkkkkkko;
+//    ;okkkdkkkxoooooooooooooooxkkxdkkko;
+//    lkx.   lxdoooooodddoooooodxc   .xkc
+//   ;00Oo   ;doodOKKWMMMWKKkoood;   lOK0;
+//   .XMN.  'loodk0KNWMMMWNK0kdooc'  .NMX
+//          ,ookOOOkOOWMWOOkOk0Ool;
+//           cxXNNKKKNMMMNKKKNMMx:
+//          'kXKOXXWMNNNNNMWXXONMO'
+//           xXKxoodxxxxxxxdooxNMd
+//             kNOooxXNNNKxoo0WO
+//            .:OXKkxoooooxkNM0:.
+//       .',;cclOXNWWXXXXXWWNXOolco,;.
+//    ';cccookkOKK0OOOKXNKOO0O0KOOxdolc:'
+//  .;clodkOO0K0kolldkOO0XkolokOOOOK0Oxol;.
+//  ;cccodOOK0Ooccoxxooook0OdlcoOOOOOxoooo:
+//  ;c::::cxOxlclolc::::::cokdlcoxOdc::::d
+//  ,cc:;   ;cccll:::,   ,::cxoccc;  .;:;;
+//   ll.    ,cccc:::      .:::cccc;    .;
+//           ccc::.         .::cc:
+//          ';;:'             .cll,
+
 package main
 
 import (

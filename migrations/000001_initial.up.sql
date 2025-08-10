@@ -15,3 +15,6 @@ CREATE TABLE player_hand (
 
 CREATE UNIQUE INDEX idx_player_card_unique_card ON player_hand (card_id, card_type, is_real);
 
+CREATE TABLE current_player (
+    current_player_id INTEGER
+)

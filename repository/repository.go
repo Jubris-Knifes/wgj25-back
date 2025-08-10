@@ -75,7 +75,7 @@ func (r *Repository) NewPlayer(ctx context.Context, playerName string) (int, err
 	return playerID, nil
 }
 
-func (r *Repository) ClosePlayer(ctx context.Context, playerID string) error {
+func (r *Repository) ClosePlayer(ctx context.Context, playerID int) error {
 	r.log.DebugContext(ctx, "closing player", "id", playerID)
 
 	const query = `
@@ -107,13 +107,16 @@ func (r *Repository) GetActivePlayerCount(ctx context.Context) (int, error) {
 	return count, nil
 }
 
-func (r *Repository) GetActivePlayerIDs(ctx context.Context) ([]string, error) {
+func (r *Repository) GetActivePlayerIDs(ctx context.Context) ([]int, error) {
 	r.log.DebugContext(ctx, "getting active player IDs")
 
 	const query = `
-		SELECT player_id FROM players WHERE is_active = TRUE
+		SELECT player_id
+		FROM players
+		WHERE is_active = TRUE
+		ORDER BY player_id
 	`
-	var playerIDs []string
+	var playerIDs []int
 	if err := sqlscan.Select(ctx, r.db, &playerIDs, query); err != nil {
 		r.log.ErrorContext(ctx, "failed to get active player IDs", "error", err)
 		return nil, err
@@ -138,7 +141,7 @@ func (r *Repository) DropPlayerHands(ctx context.Context) error {
 	return nil
 }
 
-func (r *Repository) SetPlayerHand(ctx context.Context, playerID string, cards []models.Card) error {
+func (r *Repository) SetPlayerHand(ctx context.Context, playerID int, cards []models.Card) error {
 	r.log.DebugContext(ctx, "setting player hand", "player_id", playerID, "cards", cards)
 
 	var insertQueryBuilder strings.Builder
@@ -169,4 +172,75 @@ func (r *Repository) SetPlayerHand(ctx context.Context, playerID string, cards [
 	return nil
 }
 
-// TODO: add main screen connection
+func (r *Repository) GetPlayerHand(ctx context.Context, playerID int) ([]models.Card, error) {
+	r.log.DebugContext(ctx, "getting player hand", "player_id", playerID)
+
+	const query = `
+		SELECT card_id, card_type, is_real
+		FROM player_hand
+		WHERE player_id = ?
+	`
+	var cards []models.Card
+	if err := sqlscan.Select(ctx, r.db, &cards, query, playerID); err != nil {
+		r.log.ErrorContext(ctx, "failed to get player hand", "error", err)
+		return nil, err
+	}
+
+	r.log.DebugContext(ctx, "player hand retrieved", "player_id", playerID, "cards", cards)
+
+	return cards, nil
+}
+func (r *Repository) GetCurrentPlayerID(ctx context.Context) (int, error) {
+	r.log.DebugContext(ctx, "getting current player ID")
+
+	const query = `
+		SELECT current_player_id FROM current_player
+	`
+	var playerID int
+	if err := sqlscan.Get(ctx, r.db, &playerID, query); err != nil {
+		r.log.ErrorContext(ctx, "failed to get current player ID", "error", err)
+		return 0, err
+	}
+
+	r.log.DebugContext(ctx, "current player ID retrieved", "player_id", playerID)
+
+	return playerID, nil
+}
+
+func (r *Repository) SetCurrentPlayerID(ctx context.Context, playerID int) error {
+	r.log.DebugContext(ctx, "setting current player ID", "player_id", playerID)
+
+	tx, err := r.db.BeginTx(ctx, nil)
+	defer rollback(tx)
+	if err != nil {
+		r.log.ErrorContext(ctx, "failed to begin transaction", "error", err)
+		return err
+	}
+
+	const deleteQuery = `--sql
+		DELETE FROM current_player
+	`
+
+	if _, err := tx.ExecContext(ctx, deleteQuery); err != nil {
+		r.log.ErrorContext(ctx, "failed to delete current player", "error", err)
+		return err
+	}
+
+	const insertQuery = `--sql
+		INSERT INTO current_player (current_player_id) VALUES (?)
+	`
+
+	if _, err := tx.ExecContext(ctx, insertQuery, playerID); err != nil {
+		r.log.ErrorContext(ctx, "failed to insert current player", "error", err)
+		return err
+	}
+
+	if err := tx.Commit(); err != nil {
+		r.log.ErrorContext(ctx, "failed to commit transaction", "error", err)
+		return err
+	}
+
+	r.log.DebugContext(ctx, "current player ID set successfully", "player_id", playerID)
+
+	return nil
+}

@@ -16,6 +16,27 @@ type (
 )
 
 const (
+	EventTypeChooseBid   EventType = "choose_bid"
+	EventTypeBidSelected EventType = "bid_selected"
+)
+
+type (
+	ChooseBidEvent = Envelope[ChooseBid]
+
+	ChooseBid struct {
+		PlayerID int   `json:"player_id"`
+		Timeout  int64 `json:"timeout"`
+	}
+
+	BidSelectedEvent = Envelope[BidSelected]
+
+	BidSelected struct {
+		Card        Card `json:"card"`
+		IsRoundDone bool `json:"is_round_over"`
+	}
+)
+
+const (
 	EventTypeDealingCards EventType = "dealing_cards"
 	EventTypeCardsDealt   EventType = "cards_dealt"
 )

@@ -9,6 +9,7 @@ import (
 	"slices"
 	"time"
 
+	"github.com/Jubris-Knifes/wgj25-back/config"
 	"github.com/Jubris-Knifes/wgj25-back/models"
 	"github.com/Jubris-Knifes/wgj25-back/repository"
 	"github.com/olahol/melody"
@@ -18,6 +19,8 @@ import (
 const (
 	PlayerIDKey = "player_id"
 )
+
+var bidSelectedChan = make(chan models.BidSelected, 1)
 
 type service struct {
 	repo *repository.Repository
@@ -59,7 +62,7 @@ func getAs[T any](log *slog.Logger, s *melody.Session, key string) (T, bool) {
 
 func (s *service) ClosedConnection(session *melody.Session) {
 	ctx := session.Request.Context()
-	id, ok := getAs[string](s.log, session, PlayerIDKey)
+	id, ok := getAs[int](s.log, session, PlayerIDKey)
 	if !ok {
 		s.log.ErrorContext(ctx, "failed to get player ID from session", "session_id", session.RemoteAddr().String())
 		return
@@ -81,9 +84,22 @@ func (s *service) HandleMessage(session *melody.Session, msg []byte) {
 	switch envelope.Type {
 	case models.EventTypeSetName:
 		s.handleSetNameEvent(session, envelope.EventData)
+	case models.EventTypeBidSelected:
+		s.handleBidSelectedEvent(session, envelope.EventData)
 	default:
 		s.log.WarnContext(session.Request.Context(), "unknown message type", "type", envelope.Type)
 	}
+}
+
+func (s *service) handleBidSelectedEvent(session *melody.Session, eventData json.RawMessage) {
+	var bidSelected models.BidSelected
+	if err := json.Unmarshal(eventData, &bidSelected); err != nil {
+		s.log.ErrorContext(session.Request.Context(), "failed to unmarshal bid_selected event", "error", err)
+		return
+	}
+
+	bidSelectedChan <- bidSelected
+
 }
 
 func (s *service) handleSetNameEvent(session *melody.Session, eventData json.RawMessage) {
@@ -219,17 +235,105 @@ func (s *service) startRound() {
 			}
 
 			s.m.BroadcastFilter(payload, func(session *melody.Session) bool {
-				pID, _ := getAs[string](s.log, session, PlayerIDKey)
+				pID, _ := getAs[int](s.log, session, PlayerIDKey)
 				return pID == playerID
 			})
 			return nil
 		})
 	}
-
 	errGroup.Wait()
+
+	startingPlayer := rand.IntN(4)
+	s.repo.SetCurrentPlayerID(ctx, playerIDs[startingPlayer])
+	s.startTurn()
 }
 
-func shuffleAndGiveCardsToPlayers(playerIDs []string) map[string][]models.Card {
+func (s *service) startTurn() {
+	ctx := context.Background()
+
+	currentPlayerID, err := s.repo.GetCurrentPlayerID(ctx)
+	if err != nil {
+		s.log.ErrorContext(ctx, "failed to get current player ID", "error", err)
+		panic(err)
+	}
+
+	timeoutForChoice := time.Duration(config.Get().Timeouts.PlayerChooseBidMilliseconds) * time.Millisecond
+	s.sendPlayerBidOfferEvent(ctx, currentPlayerID, timeoutForChoice)
+	ctx, cancel := context.WithTimeout(ctx, timeoutForChoice)
+	defer cancel()
+
+	currentPlayerHand, err := s.repo.GetPlayerHand(ctx, currentPlayerID)
+	if err != nil {
+		s.log.ErrorContext(ctx, "failed to get current player hand", "error", err)
+		panic(err)
+	}
+
+	choice := currentPlayerHand[rand.IntN(len(currentPlayerHand))]
+
+	select {
+	case playerChoice := <-bidSelectedChan:
+		if playerChoice.IsRoundDone {
+			// TODO: Handle end of round
+		}
+		choice = playerChoice.Card
+	case <-ctx.Done():
+	}
+
+	s.sendhowChoiceEvent(choice, currentPlayerID)
+}
+
+func (s *service) sendhowChoiceEvent(choice models.Card, playerID int) {
+	ctx := context.Background()
+
+	s.log.DebugContext(ctx, "sending how choice event", "player_id", playerID, "card", choice)
+
+	event := models.BidSelectedEvent{
+		Type: models.EventTypeBidSelected,
+		EventData: models.BidSelected{
+			Card: choice,
+		},
+	}
+
+	payload, err := json.Marshal(event)
+	if err != nil {
+		s.log.ErrorContext(ctx, "failed to marshal bid_selected event", "error", err)
+		return
+	}
+
+	s.broadcastToPlayerAndHub(payload, playerID)
+
+	s.log.DebugContext(ctx, "bid_selected event sent", "player_id", playerID, "card", choice)
+
+}
+
+func (s *service) sendPlayerBidOfferEvent(ctx context.Context, playerID int, timeout time.Duration) {
+	s.log.DebugContext(ctx, "sending player bid offer event", "player_id", playerID)
+
+	event := models.ChooseBidEvent{
+		Type: models.EventTypeChooseBid,
+		EventData: models.ChooseBid{
+			PlayerID: playerID,
+			Timeout:  timeout.Milliseconds(),
+		},
+	}
+
+	payload, err := json.Marshal(event)
+	if err != nil {
+		s.log.ErrorContext(ctx, "failed to marshal player bid offer event", "error", err)
+		return
+	}
+
+	s.broadcastToPlayerAndHub(payload, playerID)
+}
+
+func (s *service) broadcastToPlayerAndHub(payload []byte, playerID int) error {
+	return s.m.BroadcastFilter(payload, func(session *melody.Session) bool {
+		pID, ok := getAs[int](s.log, session, PlayerIDKey)
+		return ok && pID == playerID
+	})
+}
+
+func shuffleAndGiveCardsToPlayers(playerIDs []int) map[int][]models.Card {
 	cardsForthisRound := slices.Clone(models.AvailableRealCards)
 
 	fakeCards := slices.Clone(models.AvailableFakeCards)
@@ -253,7 +357,7 @@ func shuffleAndGiveCardsToPlayers(playerIDs []string) map[string][]models.Card {
 		cardsForthisRound[i], cardsForthisRound[j] = cardsForthisRound[j], cardsForthisRound[i]
 	})
 
-	playerHands := map[string][]models.Card{}
+	playerHands := map[int][]models.Card{}
 	for _, playerID := range playerIDs {
 		for range 5 {
 			playerHands[playerID] = append(playerHands[playerID], cardsForthisRound[0])
